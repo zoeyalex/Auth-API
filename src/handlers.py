@@ -8,6 +8,7 @@ import jwt
 from aws_lambda_typing.events import APIGatewayProxyEventV1
 from response_utils import error_response, success_response, HTTPResponse
 from auth_service import get_jwt_secret, require_auth
+from logger import logger
 
 
 # Initialize AWS resources
@@ -15,24 +16,29 @@ dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['USERS_TABLE'])
 ses = boto3.client('ses')
 # Set email authorized with SES
-SENDER_EMAIL: str ='example@domain.com'
+SENDER_EMAIL: str = os.environ['SENDER_EMAIL']
+if not SENDER_EMAIL:
+    logger.error('SENDER_EMAIL environment variable not set')
+    raise ValueError('SENDER_EMAIL environment variable not set')
 
 def get_api_endpoint(event: APIGatewayProxyEventV1) -> str:
     headers = event.get('headers', {})
     host = headers.get('Host', '')
     stage = event.get('requestContext', {}).get('stage', '')
+    logger.info('Host: %s, Stage: %s', host, stage)
     return f'https://{host}/{stage}'
 
 def handle_register(event: APIGatewayProxyEventV1) -> HTTPResponse:
-    print('Starting registration process')
+    logger.info('Starting registration process')
     try:
         body: Dict[str, Any] = json.loads(event.get('body', '{}'))
-        print(f'Parsed body: {body}')
+        logger.info(f'Parsed body: {body}')
         email: str | None = body.get('email')
         username: str | None = body.get('username')
         password: str | None = body.get('password')
 
         if not any([username, password, email]):
+            logger.warning('Registration failed: Missing required fields')
             return error_response(400, 'Missing username or password or email')
         
         # Check if user exists
@@ -42,6 +48,7 @@ def handle_register(event: APIGatewayProxyEventV1) -> HTTPResponse:
             }
         )
         if 'Item' in response:
+            logger.warning('Registration failed: Username %s taken', username)
             return error_response(400, f'Username {username} taken')
         
         # Generate new salt and hash for password encode to bytes then decode to store in db
@@ -106,9 +113,11 @@ def handle_register(event: APIGatewayProxyEventV1) -> HTTPResponse:
             }
         )
 
+        logger.info('Registration pending for user: %s', username)
         return success_response(f'Registration pending for user: {username}')
+
     except Exception as e:
-        print(f'Error in handle_register: {str(e)}')
+        logger.error('Error in handle_register: %s', str(e))
         raise
 
 def handle_activate(event: APIGatewayProxyEventV1) -> HTTPResponse:
@@ -116,10 +125,12 @@ def handle_activate(event: APIGatewayProxyEventV1) -> HTTPResponse:
         # Get token and username from query params
         query_params: Dict[str, Any] = event.get('queryStringParameters', {})
         if not query_params:
+            logger.warning('Missing query parameters')
             return error_response(400, 'Missing query parameters')
         username = query_params.get('username')
         token = query_params.get('token')
         if not all([username, token]):
+            logger.warning('Missing username or activation token')
             return error_response(400, 'Missing username or activation token')
 
         # Get user from database
@@ -129,14 +140,17 @@ def handle_activate(event: APIGatewayProxyEventV1) -> HTTPResponse:
             }
         )
         if 'Item' not in response:
+            logger.warning('User %s not found', username)
             return error_response(404, f'User {username} not found')
         
         user = response['Item']
 
         # Verify token
         if user['activation_token'] != token:
+            logger.warning('Invalid activation token')
             return error_response(401, 'Invalid activation token')
         if user['is_active']:
+            logger.warning('User %s already activated', username)
             return error_response(400, 'User already activated')
 
         # Update and activate user
@@ -149,9 +163,11 @@ def handle_activate(event: APIGatewayProxyEventV1) -> HTTPResponse:
                 ':active': True
             }
         )
+        logger.info('User %s activated successfully', username)
         return success_response(f'User: {username} activated successfully')
+
     except Exception as e:
-        print(f'Error in handle_activate: {str(e)}')
+        logger.error('Error in handle_activate: %s', str(e))
         raise
 
 def handle_login(event: APIGatewayProxyEventV1) -> HTTPResponse:
@@ -167,11 +183,13 @@ def handle_login(event: APIGatewayProxyEventV1) -> HTTPResponse:
     )
 
     if 'Item' not in response:
+        logger.warning('User %s not found', username)
         return error_response(401, 'Invalid credentials')
     
     # Verify password
     stored_password: bytes = response['Item']['password'].encode('utf-8')
     if not bcrypt.checkpw(password.encode('utf-8'), stored_password):
+        logger.warning('Invalid credentials for user %s', username)
         return error_response(401, 'Invalid credentials')
     
     jwt_secret: str = get_jwt_secret()
@@ -185,6 +203,7 @@ def handle_login(event: APIGatewayProxyEventV1) -> HTTPResponse:
         algorithm='HS256'
     )
 
+    logger.info('Login successful for user %s', username)
     return success_response({'message': 'Login successul', 'token': token})
 
 @require_auth
@@ -200,6 +219,7 @@ def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:
             }
         )
 
+        logger.info('User %s info retrieved successfully', username)
         return success_response(
             {
             'username': username,
@@ -216,15 +236,17 @@ def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:
             }
         )
 
+        logger.info('User %s deleted successfully', username)
         return success_response(f'User {username} deleted successfully')
     # Reset user password
     elif method == 'PUT':
         body: Dict[str, Any] = json.loads(event.get('body'))
-        print(f'Parsed body: {body}')
+        logger.info(f'Parsed body: {body}')
         old_pasword: str = body.get('old_password')
         new_password: str = body.get('new_password')
 
         if not any([old_pasword, new_password]):
+            logger.warning('Missing required fields')
             return error_response(400, 'Missing required fields')
 
         # Get stored password
@@ -237,6 +259,7 @@ def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:
         # Verify old password
         stored_password: bytes = response['Item']['password'].encode('utf-8')
         if not bcrypt.checkpw(old_pasword.encode('utf-8'), stored_password):
+            logger.warning('Invalid credentials for user %s', username)
             return error_response(401, 'Invalid credentials')
 
         # Generate new salt and hash new password
@@ -254,4 +277,5 @@ def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:
             }
         )
 
+        logger.info('Password for user %s reset successfully', username)
         return success_response(f'Password for user {username} reset successfully')
