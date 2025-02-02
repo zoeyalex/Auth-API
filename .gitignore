@@ -1,0 +1,4 @@
+.aws-sam
+samconfig.toml
+TODO.MD
+venv
