@@ -2,6 +2,13 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Simple authentication API using SAM
 
+Parameters:
+  SenderEmail:
+    Type: String
+    Description: Email address to use as sender for SES
+    AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    ConstraintDescription: Must be a valid email address
+    
 Resources:
   UsersTable:
     Type: AWS::DynamoDB::Table
@@ -39,6 +46,7 @@ Resources:
         Variables:
           USERS_TABLE: !Ref UsersTable
           JWT_SECRET_NAME: !Ref JWTSecret
+          SENDER_EMAIL: !Ref SenderEmail
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable

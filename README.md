@@ -47,3 +47,29 @@ auth-api
     ├── auth_service.py         # JWT secret retrieval, token verification
     └── response_utils.py       # Utilities for success/error HTTP responses
 ```
+
+## Prerequisites
+- AWS SAM CLI installed
+- AWS credentials configured
+- A verified email address in AWS SES (in the region you're deploying to)
+
+## Building and Deploying
+### Build the application
+```bash
+sam build
+```
+### Deploy the application
+
+ *First time deployment:*
+```
+sam deploy --guided
+```
+*Subsequent deployments:*
+```
+sam deploy --parameter-overrides SenderEmail=verified.email@domain.com
+```
+
+## Testign Locally
+```
+sam local start-api --parameter-overrides SenderEmail=verified.email@domain.com
+```

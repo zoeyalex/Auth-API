@@ -15,7 +15,7 @@ from logger import logger
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['USERS_TABLE'])
 ses = boto3.client('ses')
-# Set email authorized with SES
+# get email authorized with SES from template 
 SENDER_EMAIL: str = os.environ['SENDER_EMAIL']
 if not SENDER_EMAIL:
     logger.error('SENDER_EMAIL environment variable not set')

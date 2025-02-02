@@ -1,9 +1,5 @@
 import json
-import os
 import traceback
-# load env
-from pathlib import Path
-from dotenv import load_dotenv
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events import APIGatewayProxyEventV1
 from response_utils import (
@@ -12,11 +8,6 @@ from response_utils import (
 )
 from router import get_route_handler
 from logger import logger
-
-project_root = Path(__file__).parent.parent
-env_path = project_root / '.env'
-if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
 
 
 def lambda_handler(event: APIGatewayProxyEventV1, context: Context) -> HTTPResponse:
