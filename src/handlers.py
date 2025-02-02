@@ -9,6 +9,7 @@ from aws_lambda_typing.events import APIGatewayProxyEventV1
 from response_utils import error_response, success_response, HTTPResponse
 from auth_service import get_jwt_secret, require_auth
 from logger import logger
+from validators import register_validator, login_validator, activate_validator
 
 
 # Initialize AWS resources
@@ -33,13 +34,16 @@ def handle_register(event: APIGatewayProxyEventV1) -> HTTPResponse:
     try:
         body: Dict[str, Any] = json.loads(event.get('body', '{}'))
         logger.info(f'Parsed body: {body}')
-        email: str | None = body.get('email')
-        username: str | None = body.get('username')
-        password: str | None = body.get('password')
 
-        if not any([username, password, email]):
-            logger.warning('Registration failed: Missing required fields')
-            return error_response(400, 'Missing username or password or email')
+        # Validate request body
+        is_valid, error_message = register_validator.validate(body)
+        if not is_valid:
+            logger.warning('Registration failed: %s', error_message)
+            return error_response(400, error_message)
+
+        email: str = body.get('email')
+        username: str = body.get('username')
+        password: str = body.get('password')
         
         # Check if user exists
         response: Dict[str, Any] = table.get_item(
@@ -121,17 +125,17 @@ def handle_register(event: APIGatewayProxyEventV1) -> HTTPResponse:
         raise
 
 def handle_activate(event: APIGatewayProxyEventV1) -> HTTPResponse:
+    logger.info('Starting activation process')
     try:
         # Get token and username from query params
         query_params: Dict[str, Any] = event.get('queryStringParameters', {})
-        if not query_params:
-            logger.warning('Missing query parameters')
-            return error_response(400, 'Missing query parameters')
+
+        is_valid, error_message = activate_validator.validate(query_params)
+        if not is_valid:
+            logger.warning('Activation failed: %s', error_message)
+            return error_response(400, error_message)
         username = query_params.get('username')
         token = query_params.get('token')
-        if not all([username, token]):
-            logger.warning('Missing username or activation token')
-            return error_response(400, 'Missing username or activation token')
 
         # Get user from database
         response: Dict[str, Any] = table.get_item(
@@ -171,40 +175,53 @@ def handle_activate(event: APIGatewayProxyEventV1) -> HTTPResponse:
         raise
 
 def handle_login(event: APIGatewayProxyEventV1) -> HTTPResponse:
-    body: Dict[str, Any] = json.loads(event.get('body'))
-    username: str = body.get('username')
-    password: str = body.get('password')
+    logger.info('Starting login process')
+    try:
+        body: Dict[str, Any] = json.loads(event.get('body'))
 
-    # Get user from database
-    response: Dict[str, Any] = table.get_item(
-        Key={
-            'username': username
-        }
-    )
+        # Validate request body
+        is_valid, error_message = login_validator.validate(body)
+        if not is_valid:
+            logger.warning('Login failed: %s', error_message)
+            return error_response(400, error_message)
 
-    if 'Item' not in response:
-        logger.warning('User %s not found', username)
-        return error_response(401, 'Invalid credentials')
+        username: str = body.get('username')
+        password: str = body.get('password')
+
+        # Get user from database
+        response: Dict[str, Any] = table.get_item(
+            Key={
+                'username': username
+            }
+        )
+
+        if 'Item' not in response:
+            logger.warning('User %s not found', username)
+            return error_response(401, 'Invalid credentials')
+        
+        # Verify password
+        stored_password: bytes = response['Item']['password'].encode('utf-8')
+        if not bcrypt.checkpw(password.encode('utf-8'), stored_password):
+            logger.warning('Invalid credentials for user %s', username)
+            return error_response(401, 'Invalid credentials')
+        
+        jwt_secret: str = get_jwt_secret()
+        token: str  = jwt.encode(
+            {
+                'username': username,
+                'exp': datetime.utcnow() + timedelta(hours=1),
+                'iat': datetime.utcnow()
+            },
+            jwt_secret,
+            algorithm='HS256'
+        )
+
+        logger.info('Login successful for user %s', username)
+        return success_response({'message': 'Login successul', 'token': token})
     
-    # Verify password
-    stored_password: bytes = response['Item']['password'].encode('utf-8')
-    if not bcrypt.checkpw(password.encode('utf-8'), stored_password):
-        logger.warning('Invalid credentials for user %s', username)
-        return error_response(401, 'Invalid credentials')
-    
-    jwt_secret: str = get_jwt_secret()
-    token: str  = jwt.encode(
-        {
-            'username': username,
-            'exp': datetime.utcnow() + timedelta(hours=1),
-            'iat': datetime.utcnow()
-        },
-        jwt_secret,
-        algorithm='HS256'
-    )
-
-    logger.info('Login successful for user %s', username)
-    return success_response({'message': 'Login successul', 'token': token})
+    except Exception as e:
+        logger.error('Error in handle_login: %s', str(e))
+        raise
 
 @require_auth
 def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:

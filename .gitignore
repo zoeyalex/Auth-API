@@ -3,3 +3,5 @@ samconfig.toml
 TODO.MD
 venv
 .env
+*__pycache__*
+*pytest_cache*

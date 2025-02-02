@@ -27,8 +27,6 @@ def verify_token(token: str) -> str:
     try:
         jwt_secret: str = get_jwt_secret()
         payload: Dict[str, Any] = jwt.decode(token, jwt_secret, algorithms=['HS256'])
-
-        logger.info('Token verified successfully')
         return payload['username']
     except jwt.ExpiredSignatureError:
         logger.warning('Token has expired')
