@@ -36,7 +36,7 @@ Simple authentication API with user registration, activation, login, account inf
    - A **SES** email is sent from set authorized `SENDER_EMAIL` with an activation link (`/auth/activate?token=...`) upon registration.  
    - Clicking the link validates the token and updates the `is_active` field in DynamoDB.  
 
-## Project Structure
+<!-- ## Project Structure
 ```
 auth-api
 ├── template.yaml               # SAM template defining the auth-api resources
@@ -46,7 +46,7 @@ auth-api
     ├── handlers.py             # Handlers for register, activate, login, user mgmt
     ├── auth_service.py         # JWT secret retrieval, token verification
     └── response_utils.py       # Utilities for success/error HTTP responses
-```
+``` -->
 
 ## Prerequisites
 - AWS SAM CLI installed
