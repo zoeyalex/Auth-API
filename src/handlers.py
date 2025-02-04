@@ -9,7 +9,7 @@ from aws_lambda_typing.events import APIGatewayProxyEventV1
 from response_utils import error_response, success_response, HTTPResponse
 from auth_service import get_jwt_secret, require_auth
 from logger import logger
-from validators import register_validator, login_validator, activate_validator
+from validators import register_validator, login_validator, reset_password_validator, activate_validator
 
 
 # Initialize AWS resources
@@ -81,6 +81,8 @@ def handle_register(event: APIGatewayProxyEventV1) -> HTTPResponse:
                 'email': email,
                 'password': hashed_password.decode('utf-8'),
                 'created_at': created_at,
+                'updated_at': created_at,
+                'last_login': '', # None seems to resolve into Null: True
                 'is_active': False,
                 'activation_token': activation_token
             }
@@ -162,9 +164,10 @@ def handle_activate(event: APIGatewayProxyEventV1) -> HTTPResponse:
             Key={
                 'username': username
             },
-            UpdateExpression='SET is_active = :active REMOVE activation_token',
+            UpdateExpression='SET is_active = :active, updated_at = :updated_at REMOVE activation_token',
             ExpressionAttributeValues={
-                ':active': True
+                ':active': True,
+                ':updated_at': datetime.now().isoformat()
             }
         )
         logger.info('User %s activated successfully', username)
@@ -216,6 +219,17 @@ def handle_login(event: APIGatewayProxyEventV1) -> HTTPResponse:
             algorithm='HS256'
         )
 
+        # Update last login
+        table.update_item(
+            Key={
+                'username': username
+            },
+            UpdateExpression='SET last_login = :last_login',
+            ExpressionAttributeValues={
+                ':last_login': datetime.now().isoformat()
+            }
+        )
+
         logger.info('Login successful for user %s', username)
         return success_response({'message': 'Login successul', 'token': token})
     
@@ -242,6 +256,8 @@ def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:
             'username': username,
             'email': response['Item'].get('email'),
             'created_at': response['Item'].get('created_at'),
+            'updated_at': response['Item'].get('updated_at'),
+            'last_login': response['Item'].get('last_login'),
             'is_active': response['Item'].get('is_active')
             }
         )
@@ -259,12 +275,14 @@ def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:
     elif method == 'PUT':
         body: Dict[str, Any] = json.loads(event.get('body'))
         logger.info(f'Parsed body: {body}')
+        
+        is_valid, error_message = reset_password_validator.validate(body)
+        if not is_valid:
+            logger.warning('Reset password failed: %s', error_message)
+            return error_response(400, error_message)
+
         old_pasword: str = body.get('old_password')
         new_password: str = body.get('new_password')
-
-        if not any([old_pasword, new_password]):
-            logger.warning('Missing required fields')
-            return error_response(400, 'Missing required fields')
 
         # Get stored password
         response: Dict[str, Any] = table.get_item(
@@ -283,14 +301,15 @@ def handle_user(event: APIGatewayProxyEventV1) -> HTTPResponse:
         salt: bytes = bcrypt.gensalt()
         new_hashed_password: bytes = bcrypt.hashpw(new_password.encode('utf-8'), salt)
 
-        # Update password in database
+        # Update password and updated_at
         table.update_item(
             Key={
                 'username': username
             },
-            UpdateExpression='set password = :p',
+            UpdateExpression='SET password = :password, updated_at = :updated_at',
             ExpressionAttributeValues={
-                ':p': new_hashed_password.decode('utf-8')
+                ':password': new_hashed_password.decode('utf-8'),
+                ':updated_at': datetime.now().isoformat()
             }
         )
 

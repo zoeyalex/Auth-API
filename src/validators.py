@@ -89,6 +89,31 @@ class LoginValidator(BodyValidator):
     def __init__(self):
         super().__init__(set(['username', 'password']))
 
+class ResetPasswordValidator(BodyValidator):
+    """
+    Validator for reset password requests (/user/ PUT)
+    """
+    def __init__(self):
+        super().__init__(set(['old_password', 'new_password']))
+
+    def validate(self, body: Dict[str, Any]) -> Tuple[bool, str | None]:
+        # Validate body
+        is_valid, error_message = super().validate(body)
+        if not is_valid:
+            return False, error_message
+
+        # Validate new_password
+        new_password: str = body['new_password']
+        if not self._is_valid_password(new_password):
+            return False, 'New password must be 8-20 characters long'
+
+        return True, None
+
+    def _is_valid_password(self, password: str) -> bool:
+        logger.info('Validating password')
+        password_pattern = r"^(?=.{8,20}$)[-A-Za-z0-9!\"#$%&'()*+,.\/:;<=>?@\[\]\\^_`{|}~]+$"
+        return bool(re.match(password_pattern, password))
+
 
 class QueryParamsValidator:
     """
@@ -134,4 +159,5 @@ class ActivateValidator(QueryParamsValidator):
 # Create validator instances
 register_validator = RegisterValidator()
 login_validator = LoginValidator()
+reset_password_validator = ResetPasswordValidator()
 activate_validator = ActivateValidator()
